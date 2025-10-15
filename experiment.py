@@ -87,7 +87,7 @@ def experiment(
         with open(test_trajectory_file, "rb") as f:
             test_trajectory = pickle.load(f)
         max_ep_len = len(test_df)//stock_dimension
-        env_targets_test = [2_000_000] # this is for evaluation of the trained DT because we need a RTG to make an inference 
+        env_targets_test = [2_000_000] # this is for evaluation of the trained DT because we need a RTG to make an inference
         scale = env_kwargs["reward_scaling"]
     else:
         raise NotImplementedError
@@ -340,6 +340,11 @@ def experiment(
 
         return fn
 
+    max_eval_ep_len = variant.get("max_eval_ep_len", 0)
+    if max_eval_ep_len:
+        max_ep_len_train = min(max_ep_len_train, max_eval_ep_len)
+        max_ep_len = min(max_ep_len, max_eval_ep_len)
+
     if variant["model_type"] == "dt":
         print("Initializing decision transformer model with some adapters...")
         model = DecisionTransformer(
@@ -486,6 +491,13 @@ def experiment(
     
     visualize = variant["visualize"]
 
+    if variant.get("skip_eval"):
+        eval_fns = []
+    else:
+        eval_fns = [eval_episodes_train(tar) for tar in env_targets_train] + [
+            eval_episodes_test(tar) for tar in env_targets_test
+        ]
+
     if variant["model_type"] == "dt":
         trainer = SequenceTrainer(
             args=variant,
@@ -495,7 +507,7 @@ def experiment(
             get_batch=get_batch,
             scheduler=scheduler,
             loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a) ** 2),
-            eval_fns=[eval_episodes_train(tar) for tar in env_targets_train] + [eval_episodes_test(tar) for tar in env_targets_test],
+            eval_fns=eval_fns,
         )
     elif variant["model_type"] == "bc":
         trainer = ActTrainer(
@@ -506,7 +518,7 @@ def experiment(
             get_batch=get_batch,
             scheduler=scheduler,
             loss_fn=lambda s_hat, a_hat, r_hat, s, a, r: torch.mean((a_hat - a) ** 2),
-            eval_fns=[eval_episodes_train(tar) for tar in env_targets_train] + [eval_episodes_test(tar) for tar in env_targets_test],
+            eval_fns=eval_fns,
         )
 
     trainer.train_iteration(
@@ -532,6 +544,10 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=11102)
     parser.add_argument("--outdir", type=str, default=None)
     parser.add_argument("--fp16", action="store_true", default=False)
+    parser.add_argument("--eval_log_interval", type=int, default=0,
+                        help="Log evaluation rewards every N steps (0 disables logging)")
+    parser.add_argument("--max_eval_ep_len", type=int, default=0,
+                        help="Cap the evaluation episode length (0 keeps the dataset length)")
     # architecture, don't need to care about in our method
     parser.add_argument("--embed_dim", type=int, default=128)
     parser.add_argument("--n_layer", type=int, default=11) # this makes similar to decision transformer for comparison for behavior cloning
@@ -564,6 +580,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_type", type=str, default="dt")  # dt for decision transformer, bc for behavior cloning 
     parser.add_argument("--num_steps", type=int, default=75500)
     parser.add_argument("--test_trajectory_file", type=str, default=None)
+    parser.add_argument("--skip_eval", action="store_true", default=False)
 
     args = parser.parse_args()
     print("args: ", vars(args))

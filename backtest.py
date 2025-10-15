@@ -44,7 +44,7 @@ train.index.names = ['']
 trade = trade.set_index(trade.columns[0])
 trade.index.names = ['']
 
-algorithms = ['a2c', 'ddpg', 'ppo', 'td3', 'sac']
+algorithms = ['ppo']
 
 # Define a mapping for better legend labels
 label_mapping = {
@@ -212,18 +212,21 @@ for current_algo in algorithms:
     TEST_END_DATE = '2021-10-29'
 
     # Fetch DJIA data for the test period
-    df_dji = YahooDownloader(start_date=TEST_START_DATE,
-                             end_date=TEST_END_DATE,
-                             ticker_list=['dji']).fetch_data()
+    try:
+        df_dji = YahooDownloader(start_date=TEST_START_DATE,
+                                 end_date=TEST_END_DATE,
+                                 ticker_list=['dji']).fetch_data()
 
-    df_dji = df_dji[['date','close']]
-    fst_day = df_dji['close'].iloc[0]
-    dji = pd.DataFrame({
-        'DJIA': df_dji['close'].div(fst_day).mul(1000000)
-    }, index=df_dji['date'])
+        df_dji = df_dji[['date','close']]
+        fst_day = df_dji['close'].iloc[0]
+        dji = pd.DataFrame({
+            'DJIA': df_dji['close'].div(fst_day).mul(1000000)
+        }, index=df_dji['date'])
 
-    # Merge DJIA data using inner join to ensure alignment
-    result = pd.merge(result, dji, how='inner', left_index=True, right_index=True).fillna(method='bfill')
+        # Merge DJIA data using inner join to ensure alignment
+        result = pd.merge(result, dji, how='inner', left_index=True, right_index=True).fillna(method='bfill')
+    except Exception as exc:
+        print(f"Warning: Unable to fetch DJIA benchmark; continuing without it. ({exc})")
 
     # Control variables
     include_ensemble = False  # Set to False to exclude ensemble experiments
@@ -427,6 +430,8 @@ for current_algo in algorithms:
     
     print("\n")
 
+    continue  # Skip plotting in automated runs
+
     # Debugging: Check if all means align with result.index
     for exp_name, stats in experiment_stats.items():
         mean_length = len(stats['mean'])
@@ -439,21 +444,23 @@ for current_algo in algorithms:
     # Plotting section
     plt.figure(figsize=(16, 9))  # Increased figure size for better readability
     method_styles = {
-    'CQL': {'color': '#1f77b4', 'linestyle': '-'},           # Blue solid
-    'IQL': {'color': '#ff7f0e', 'linestyle': '--'},          # Orange dashed
-    'BC': {'color': '#2ca02c', 'linestyle': '-.'},           # Green dash-dot
-    'DT LoRA GPT2': {'color': '#d62728', 'linestyle': ':'},  # Red dotted
-    'DT LoRA Random Weight GPT2': {'color': '#9467bd', 'linestyle': '-'},  # Purple solid
-    'A2C': {'color': '#8c564b', 'linestyle': '--'},          # Brown dashed
-    'DDPG': {'color': '#e377c2', 'linestyle': '-'},          # Pink solid
-    'PPO': {'color': '#7f7f7f', 'linestyle': '-'},           # Gray solid
-    'TD3': {'color': '#bcbd22', 'linestyle': '--'},          # Olive dashed
-    'SAC': {'color': '#17becf', 'linestyle': '-'},           # Cyan solid
-    'DJIA': {'color': '#000000', 'linestyle': '-'},          # Black solid
-    # Add more methods here if needed
-}
-    # Plot DJIA
-    plt.plot(result.index, result['DJIA'], label="Dow Jones Index", linestyle=method_styles['DJIA']['linestyle'], color=method_styles['DJIA']['color'])
+        'CQL': {'color': '#1f77b4', 'linestyle': '-'},
+        'IQL': {'color': '#ff7f0e', 'linestyle': '--'},
+        'BC': {'color': '#2ca02c', 'linestyle': '-.'},
+        'DT LoRA GPT2': {'color': '#d62728', 'linestyle': ':'},
+        'DT LoRA Random Weight GPT2': {'color': '#9467bd', 'linestyle': '-'},
+        'A2C': {'color': '#8c564b', 'linestyle': '--'},
+        'DDPG': {'color': '#e377c2', 'linestyle': '-'},
+        'PPO': {'color': '#7f7f7f', 'linestyle': '-'},
+        'TD3': {'color': '#bcbd22', 'linestyle': '--'},
+        'SAC': {'color': '#17becf', 'linestyle': '-'},
+    }
+    if 'DJIA' in result.columns:
+        method_styles['DJIA'] = {'color': '#000000', 'linestyle': '-'}
+
+    # Plot DJIA if present
+    if 'DJIA' in result.columns:
+        plt.plot(result.index, result['DJIA'], label="Dow Jones Index", linestyle=method_styles['DJIA']['linestyle'], color=method_styles['DJIA']['color'])
 
     # Define color palette and line styles
     color_palette = plt.get_cmap('tab10').colors  # Colorblind-friendly palette

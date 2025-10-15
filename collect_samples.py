@@ -6,13 +6,16 @@ os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
+import argparse
+from datetime import datetime
+import pickle
+
 import numpy as np
 import pandas as pd
-import pickle
-from tqdm import tqdm
-from datetime import datetime
-from finrl.config import INDICATORS, TRAINED_MODEL_DIR
 from stable_baselines3 import A2C, DDPG, TD3, PPO, SAC
+from tqdm import tqdm
+
+from finrl.config import INDICATORS, TRAINED_MODEL_DIR
 
 random_seed = 21102
 
@@ -63,16 +66,35 @@ def collect_single_trajectory(env_kwargs, model, train_data):
 
     return trajectory
 
-if __name__ == "__main__":
-    # Define the list of models and datasets
-    model_choices = ['a2c', 'ddpg', 'td3', 'ppo', 'sac']
-    dataset_choices = ['train', 'test']
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Collect trajectories from trained RL agents")
+    parser.add_argument(
+        "--models",
+        nargs="+",
+        default=["a2c", "ddpg", "td3", "ppo", "sac"],
+        help="Algorithms to collect trajectories from.",
+    )
+    parser.add_argument(
+        "--datasets",
+        nargs="+",
+        default=["train", "test"],
+        choices=["train", "test"],
+        help="Datasets to evaluate on.",
+    )
+    parser.add_argument("--episodes", type=int, default=1, help="Trajectories per model")
+    parser.add_argument("--output-dir", default="data")
+    return parser.parse_args()
 
-    # Number of trajectories to collect per model
-    episodes_per_model = 1  # Keep this as 1
+
+if __name__ == "__main__":
+    args = parse_args()
+
+    model_choices = args.models
+    dataset_choices = args.datasets
+    episodes_per_model = args.episodes
 
     # Ensure the 'data' directory exists
-    data_dir = 'data'
+    data_dir = args.output_dir
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
@@ -105,8 +127,10 @@ if __name__ == "__main__":
         ensemble_trajectories = []
 
         for model_choice in model_choices:
-            # Load the model
             model_path = os.path.join(TRAINED_MODEL_DIR, f"agent_{model_choice}")
+            if not os.path.exists(f"{model_path}.zip") and not os.path.exists(model_path):
+                print(f"Skipping {model_choice.upper()} - no trained model found at {model_path}")
+                continue
             if model_choice == 'a2c':
                 model = A2C.load(model_path)
             elif model_choice == 'ddpg':
@@ -120,26 +144,34 @@ if __name__ == "__main__":
             else:
                 raise ValueError(f"Unknown model choice: {model_choice}")
 
-            # Collect one trajectory for the current model
-            trajectory = collect_single_trajectory(env_kwargs, model, data)
-            
-            # Save individual model trajectory
-            current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            output_filename = f'{train_or_test}_{model_choice}_trajectory_{current_time}.pkl'
-            output_path = os.path.join(data_dir, output_filename)
-            with open(output_path, 'wb') as f:
-                pickle.dump([trajectory], f)
-            
-            print(f"Saved 1 trajectory for {model_choice.upper()} on {train_or_test} data to '{output_path}'")
-            
-            # Add to ensemble trajectories
-            ensemble_trajectories.append(trajectory)
+            for episode in range(episodes_per_model):
+                trajectory = collect_single_trajectory(env_kwargs, model, data)
+
+                current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                output_filename = (
+                    f'{train_or_test}_{model_choice}_trajectory_{episode + 1}_{current_time}.pkl'
+                )
+                output_path = os.path.join(data_dir, output_filename)
+                with open(output_path, 'wb') as f:
+                    pickle.dump([trajectory], f)
+
+                print(
+                    f"Saved trajectory {episode + 1}/{episodes_per_model} for {model_choice.upper()} "
+                    f"on {train_or_test} data to '{output_path}'"
+                )
+
+                ensemble_trajectories.append(trajectory)
 
         # Save the ensemble trajectories to a pickle file
         current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        ensemble_filename = f'{train_or_test}_ensemble_trajectories_{len(model_choices)}_{current_time}.pkl'
+        ensemble_filename = (
+            f'{train_or_test}_ensemble_trajectories_{len(ensemble_trajectories)}_{current_time}.pkl'
+        )
         ensemble_path = os.path.join(data_dir, ensemble_filename)
         with open(ensemble_path, 'wb') as f:
             pickle.dump(ensemble_trajectories, f)
 
-        print(f"Saved ensemble of {len(model_choices)} trajectories (one from each model) on {train_or_test} data to '{ensemble_path}'")
+        print(
+            f"Saved ensemble of {len(ensemble_trajectories)} trajectories on {train_or_test} data "
+            f"to '{ensemble_path}'"
+        )
