@@ -1,6 +1,6 @@
-from torch import optim
 from itertools import chain
-import timm.optim.optim_factory as optim_factory
+
+from torch import optim
 
 
 def get_optimizer(args, model):

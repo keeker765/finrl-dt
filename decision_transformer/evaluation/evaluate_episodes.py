@@ -40,6 +40,8 @@ def evaluate_episode(
     total_asset_value_list = [env.initial_amount]
     loss_list = []
 
+    episode_finished = False
+
     for t in range(max_ep_len):
         # add padding
         actions = torch.cat([actions, torch.zeros((1, act_dim), device=device)], dim=0)
@@ -94,7 +96,23 @@ def evaluate_episode(
                 with open(loss_list_file_path, 'wb') as f:
                     pickle.dump(loss_list, f)
 
+            episode_finished = True
             break
+
+    if not episode_finished:
+        outdir = variant.get('outdir', 'output')
+        os.makedirs(outdir, exist_ok=True)
+
+        file_name = f'total_asset_value_change_{train_or_test}.pkl'
+        file_path = os.path.join(outdir, file_name)
+        with open(file_path, 'wb') as f:
+            pickle.dump(total_asset_value_list, f)
+
+        if loss_list:
+            loss_list_file_name = f'{train_or_test}_loss_list.pkl'
+            loss_list_file_path = os.path.join(outdir, loss_list_file_name)
+            with open(loss_list_file_path, 'wb') as f:
+                pickle.dump(loss_list, f)
 
     return episode_return, episode_length
 
@@ -144,6 +162,14 @@ def evaluate_episode_rtg(
     loss_list = []
     total_asset_value_list = [env.initial_amount]
 
+    log_interval = None
+    if variant is not None:
+        interval_raw = variant.get("eval_log_interval")
+        if interval_raw:
+            log_interval = max(1, int(interval_raw))
+
+    episode_finished = False
+
     for t in range(max_ep_len):
         # add padding
         actions = torch.cat([actions, torch.zeros((1, act_dim), device=device)], dim=0)
@@ -164,7 +190,14 @@ def evaluate_episode_rtg(
         loss_list.append(test_loss.item())
                 
         state, reward, done, _, _ = env.step(action)
-        print("reward:", reward)
+
+        if log_interval:
+            # Emit the occasional reward value to monitor progress without
+            # overwhelming the console. Index from one so the first emission is
+            # aligned with human-friendly step counts.
+            step_no = t + 1
+            if step_no % log_interval == 0 or done:
+                print(f"reward[{step_no}]: {reward}")
         total_asset_value_list.append(total_asset_value_list[-1] + reward * (1/env.reward_scaling))
 
         cur_state = torch.from_numpy(np.array(state)).to(device=device).reshape(1, state_dim)
@@ -206,9 +239,25 @@ def evaluate_episode_rtg(
             with open(file_path, 'wb') as f:
                 pickle.dump(total_asset_value_list, f)
 
+            episode_finished = True
             break
 
     model.past_key_values = None
+
+    if not episode_finished:
+        outdir = variant.get('outdir', 'output')
+        os.makedirs(outdir, exist_ok=True)
+
+        file_name = f'total_asset_value_change_{train_or_test}_env_{target_reward_raw}.pkl'
+        file_path = os.path.join(outdir, file_name)
+        with open(file_path, 'wb') as f:
+            pickle.dump(total_asset_value_list, f)
+
+        if loss_list:
+            loss_list_file_name = f'{train_or_test}_loss_list_{target_reward_raw}.pkl'
+            loss_list_file_path = os.path.join(outdir, loss_list_file_name)
+            with open(loss_list_file_path, 'wb') as f:
+                pickle.dump(loss_list, f)
 
     return episode_return, episode_length
 
